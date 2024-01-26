@@ -1,42 +1,14 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"io"
 	"os"
-	"strings"
 
 	"github.com/youpy/go-wav"
+
+	adConverter "github.com/ysh86/CMTtools/adc"
 )
-
-func trace2bits(wbits io.WriteCloser, f *os.File) {
-	go func() {
-		defer wbits.Close()
-
-		scanner := bufio.NewScanner(f)
-		var bit [1]byte
-		for scanner.Scan() {
-			l := scanner.Text()
-			// Zero
-			if strings.Contains(l, "#$34") {
-				bit[0] = 0
-				_, err := wbits.Write(bit[:])
-				if err != nil {
-					panic(err)
-				}
-			}
-			// One
-			if strings.Contains(l, "#$6A") {
-				bit[0] = 1
-				_, err := wbits.Write(bit[:])
-				if err != nil {
-					panic(err)
-				}
-			}
-		}
-	}()
-}
 
 func main() {
 	inFile := flag.String("infile", "", "trace log to convert")
@@ -70,7 +42,7 @@ func main() {
 	// step1: trace log to bits
 	rbits, wbits := io.Pipe()
 	defer rbits.Close()
-	trace2bits(wbits, f)
+	adConverter.FBAsm2bits(wbits, f)
 	bits, err := io.ReadAll(rbits) // all on mem :)
 	if err != nil {
 		panic(err)

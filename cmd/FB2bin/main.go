@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/youpy/go-wav"
+	adConverter "github.com/ysh86/CMTtools/adc"
 )
 
 func bitToByte(length int, bits []byte) (uint16, error) {
@@ -110,166 +109,6 @@ func dumpData(attrib uint16, bits []byte) {
 	}
 }
 
-func wav2bits(wbits io.WriteCloser, f *os.File) {
-	reader := wav.NewReader(f)
-
-	// input parameters
-	duration, err := reader.Duration()
-	if err != nil {
-		panic(err)
-	}
-	format, err := reader.Format()
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("duration:    %v\n", duration)
-	fmt.Printf("format:      %v\n", format.AudioFormat)
-	fmt.Printf("bits/sample: %v\n", format.BitsPerSample)
-	fmt.Printf("block align: %v\n", format.BlockAlign)
-	fmt.Printf("byte rate:   %v\n", format.ByteRate)
-	fmt.Printf("ch:          %v\n", format.NumChannels)
-	fmt.Printf("sample rate: %v\n", format.SampleRate)
-	if format.AudioFormat != wav.AudioFormatPCM {
-		panic(errors.New("format.AudioFormat"))
-	}
-	if format.BitsPerSample != 8 && format.BitsPerSample != 16 {
-		panic(errors.New("format.BitsPerSample"))
-	}
-
-	// wav parameters
-	//  Zero: short 10 - 13 -> 11.5 samples x2 @ 44.1kHz = 1917 Hz
-	//  One:  long  22 - 24 -> 23.0 samples x2 @ 44.1kHz = 958 Hz
-	//  margin: 2
-	//
-	thLo := 0
-	thHi := 0
-	if format.BitsPerSample == 8 {
-		th := 1 << (format.BitsPerSample - 1)
-		thLo = th * 3 / 5
-		thHi = th * 7 / 5
-	} else {
-		th := 1 << (format.BitsPerSample - 1)
-		thLo = th*3/5 - th
-		thHi = th*7/5 - th
-	}
-	fmt.Printf("threshold L: %d\n", thLo)
-	fmt.Printf("threshold H: %d\n", thHi)
-	countForZero := format.SampleRate/1917/2 - 2
-	countForOne := format.SampleRate/958/2 - 2
-	fmt.Printf("threshold 0: %v\n", countForZero)
-	fmt.Printf("threshold 1: %v\n", countForOne)
-
-	go func() {
-		defer wbits.Close()
-
-		counter255 := 0
-		var bit [1]byte
-		for {
-			samples, err := reader.ReadSamples(1024)
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				panic(err)
-			}
-
-			for _, sample := range samples {
-				value := reader.IntValue(sample, 0) // L only
-				// fix level
-				if value < thLo {
-					value = 0
-				} else if value > thHi {
-					value = 255
-				} else {
-					value = 128
-				}
-				// count
-				if value == 255 {
-					counter255++
-				} else if counter255 != 0 {
-					if counter255 >= int(countForOne) {
-						//fmt.Printf("1: %d\n", counter255)
-						bit[0] = 1
-						_, err := wbits.Write(bit[:])
-						if err != nil {
-							panic(err)
-						}
-					} else if counter255 >= int(countForZero) {
-						//fmt.Printf("0: %d\n", counter255)
-						bit[0] = 0
-						_, err := wbits.Write(bit[:])
-						if err != nil {
-							panic(err)
-						}
-					}
-					counter255 = 0
-				}
-			}
-		}
-	}()
-}
-
-func trace2bits(wbits io.WriteCloser, f *os.File) {
-	go func() {
-		defer wbits.Close()
-
-		scanner := bufio.NewScanner(f)
-		zeroOrOne := -1
-		count := -1
-		var bit [1]byte
-		for scanner.Scan() {
-			l := scanner.Text()
-			if strings.Contains(l, "LDA") {
-				if zeroOrOne == 1 {
-					if count == 52 {
-						bit[0] = 0
-						_, err := wbits.Write(bit[:])
-						if err != nil {
-							panic(err)
-						}
-					} else if count == 106 {
-						bit[0] = 1
-						_, err := wbits.Write(bit[:])
-						if err != nil {
-							panic(err)
-						}
-					} else {
-						panic(errors.New("invalid trace log"))
-					}
-				}
-				if strings.Contains(l, "#$04") {
-					zeroOrOne = 0
-					count = 0
-				}
-				if strings.Contains(l, "#$FF") {
-					zeroOrOne = 1
-					count = 0
-				}
-			}
-			if strings.Contains(l, "DEC") {
-				count += 1
-			}
-		}
-		if zeroOrOne == 1 {
-			if count == 52 {
-				bit[0] = 0
-				_, err := wbits.Write(bit[:])
-				if err != nil {
-					panic(err)
-				}
-			} else if count == 106 {
-				bit[0] = 1
-				_, err := wbits.Write(bit[:])
-				if err != nil {
-					panic(err)
-				}
-			} else {
-				panic(errors.New("invalid trace log"))
-			}
-		}
-	}()
-}
-
 func main() {
 	inFile := flag.String("infile", "", "wav/trace file to decode")
 	flag.Parse()
@@ -277,6 +116,7 @@ func main() {
 		inFile = &os.Args[1]
 	}
 
+	// in
 	var err error
 	var f *os.File
 	if *inFile == "-" {
@@ -289,13 +129,13 @@ func main() {
 		defer f.Close()
 	}
 
-	// step1: wav/trace to bits
+	// step1: wav/trace log to bits
 	rbits, wbits := io.Pipe()
 	defer rbits.Close()
 	if strings.HasSuffix(*inFile, ".wav") {
-		wav2bits(wbits, f)
+		adConverter.FBWav2bits(wbits, f)
 	} else {
-		trace2bits(wbits, f)
+		adConverter.FBPort2bits(wbits, f)
 	}
 
 	// step2: bits to Tape blocks
