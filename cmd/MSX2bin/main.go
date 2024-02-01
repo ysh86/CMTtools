@@ -55,6 +55,8 @@ func main() {
 
 	LOOP:
 		// skip start code
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintf(os.Stderr, "==== CAS file ====\n")
 		for {
 			_, err := io.ReadFull(rbits, bits[0:1])
 			if err != nil {
@@ -66,8 +68,9 @@ func main() {
 			}
 			countOnes++
 		}
-		fmt.Fprintf(os.Stderr, "---- start ----\n")
-		fmt.Fprintf(os.Stderr, "start ones: %d\n", countOnes)
+		fmt.Fprintf(os.Stderr, "skip ones: %d\n", countOnes)
+		fmt.Fprintf(os.Stderr, "start: %04x, %04x\n", globalPos+pos, 0)
+		fmt.Fprintf(os.Stderr, "------------------\n")
 
 		_, err := io.ReadFull(rbits, bits[1:])
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
@@ -83,7 +86,9 @@ func main() {
 			data, err := bitToByte(bits[:])
 			if err == io.EOF {
 				countOnes = 11
-				fmt.Fprintf(os.Stderr, "EOF: %04x, %04x\n", globalPos+pos, pos)
+				fmt.Fprintf(os.Stderr, "------------------\n")
+				fmt.Fprintf(os.Stderr, "end:   %04x, %04x\n", globalPos+pos, pos)
+				fmt.Fprintf(os.Stderr, "==================\n")
 				goto LOOP
 			}
 			if err != nil {
@@ -97,8 +102,10 @@ func main() {
 			// next
 			_, err = io.ReadFull(rbits, bits[:])
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
-				fmt.Fprintf(os.Stderr, "EOF: %04x, %04x\n", globalPos+pos, pos)
-				fmt.Fprintf(os.Stderr, "---- EOF ----\n")
+				fmt.Fprintf(os.Stderr, "end:   %04x, %04x\n", globalPos+pos, pos)
+				fmt.Fprintf(os.Stderr, "==================\n")
+				fmt.Fprintln(os.Stderr, "")
+				fmt.Fprintf(os.Stderr, "------- EOF ------\n")
 				break
 			}
 			if err != nil {
@@ -130,7 +137,7 @@ func bitToByte(bits []byte) ([]byte, error) {
 
 	// start bit
 	if bits[0] != 0 {
-		e := fmt.Errorf("invalid start bits: %d, LSB %+v MSB, %d, %d", bits[0], bits[1:9], bits[9], bits[10])
+		e := fmt.Errorf("invalid start bit: %d, LSB %+v MSB, %d, %d", bits[0], bits[1:9], bits[9], bits[10])
 		fmt.Fprintln(os.Stderr, e)
 		return nil, io.EOF
 		//return nil, e
@@ -144,9 +151,9 @@ func bitToByte(bits []byte) ([]byte, error) {
 
 	// stop bits
 	if bits[9] != 1 || bits[10] != 1 {
-		e := fmt.Errorf("invalid stop bits: %d, %08b(%02x), %d, %d", bits[0], ret, ret, bits[9], bits[10])
+		e := fmt.Errorf("ignore corrupted stop bits: %d, %08b(%02X), %d, %d", bits[0], ret, ret, bits[9], bits[10])
 		fmt.Fprintln(os.Stderr, e)
-		return nil, io.EOF
+		//return nil, io.EOF
 		//return nil, e
 	}
 
