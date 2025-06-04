@@ -73,6 +73,7 @@ func main() {
 
 			// output
 			//fmt.Fprintf(os.Stderr, "%04x: %02x\n", pos, data[0])
+			fw.Write(data)
 			wbytes.Write(data)
 			pos += 1
 		}
@@ -83,6 +84,7 @@ func main() {
 	r := bufio.NewReader(rbytes)
 	block := make([]byte, 4096)
 	fileNo := 0
+	fileSize := 0
 	for {
 		p, err2 := r.Peek(2)
 		if err2 != nil {
@@ -132,12 +134,25 @@ func main() {
 			}
 			fileName := string(block[0:8])
 			fileType := (int(block[8]) << 16) | (int(block[9]) << 8) | int(block[10])
+			if fileType == 0x020000 {
+				// header&footer for machine language
+				// 0x00
+				// size  2bytes
+				// start 2bytes
+				// data  Nbytes
+				// 0xff,0x00,0x00
+				// exec  2bytes
+				fileSize = -10
+			} else {
+				fileSize = 0
+			}
 			fmt.Fprintf(os.Stderr, "    file:%d name:%s type:%06x\n", fileNo, fileName, fileType)
 		case 0x01:
 			// data
+			fileSize += int(blockSize)
 		case 0xff:
 			// end
-			fmt.Fprintf(os.Stderr, "    file:%d end\n", fileNo)
+			fmt.Fprintf(os.Stderr, "    file:%d end size:%04x(%d)\n", fileNo, fileSize, fileSize)
 			fileNo += 1
 		default:
 			panic(blockType)
