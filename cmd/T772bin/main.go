@@ -83,7 +83,10 @@ func main() {
 	// step3: parse bytes
 	r := bufio.NewReader(rbytes)
 	block := make([]byte, 4096)
+	var file *os.File
 	fileNo := 0
+	fileName := ""
+	fileType := 0
 	fileSize := 0
 	for {
 		p, err2 := r.Peek(2)
@@ -132,8 +135,8 @@ func main() {
 				fmt.Fprintf(os.Stderr, "invalid header size\n")
 				break
 			}
-			fileName := string(block[0:8])
-			fileType := (int(block[8]) << 16) | (int(block[9]) << 8) | int(block[10])
+			fileName = string(block[0:8])
+			fileType = (int(block[8]) << 16) | (int(block[9]) << 8) | int(block[10])
 			if fileType == 0x020000 {
 				// header&footer for machine language
 				// 0x00
@@ -146,12 +149,18 @@ func main() {
 			} else {
 				fileSize = 0
 			}
+			file, err = os.Create(fmt.Sprintf("%02d_%s_%06x.bin", fileNo, fileName, fileType))
+			if err != nil {
+				panic(err)
+			}
 			fmt.Fprintf(os.Stderr, "    file:%d name:%s type:%06x\n", fileNo, fileName, fileType)
 		case 0x01:
 			// data
+			file.Write(block[0:blockSize])
 			fileSize += int(blockSize)
 		case 0xff:
 			// end
+			file.Close()
 			fmt.Fprintf(os.Stderr, "    file:%d end size:%04x(%d)\n", fileNo, fileSize, fileSize)
 			fileNo += 1
 		default:
